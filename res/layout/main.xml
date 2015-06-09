@@ -49,12 +49,14 @@
 
 		<ToggleButton
 		    android:id="@+id/StartService"
-		    android:layout_width="150dp"
-		    android:layout_height="45dp"
+		    android:layout_width="wrap_content"
+		    android:layout_height="match_parent"
 		    android:layout_gravity="center_horizontal"
 		    android:background="@android:color/transparent"
 		    android:button="@drawable/mycheckbox"
 		    android:checked="false"
+		    android:minHeight="45dp"
+		    android:minWidth="150dp"
 		    android:text=""
 		    android:textOff=""
 		    android:textOn="" />
