@@ -1,0 +1,274 @@
+/*
+ * Copyright (C) 2011-2013 GUIGUI Simon, fyhertz@gmail.com
+ * 
+ * This file is part of Spydroid (http://code.google.com/p/spydroid-ipcamera/)
+ * 
+ * Spydroid is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 3 of the License, or
+ * (at your option) any later version.
+ * 
+ * This source code is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with this source code; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ */
+
+package com.raygo.spydroid.ui;
+import com.raygo.spydroid.R;
+import com.raygo.spydroid.SpydroidApplication;
+import com.raygo.streaming.SessionBuilder;
+import com.raygo.streaming.gl.SurfaceView;
+import com.raygo.streaming.rtsp.RtspServer;
+import android.app.Notification;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.ActivityInfo;
+import android.os.Bundle;
+import android.os.PowerManager;
+import android.support.v4.app.Fragment;
+import android.support.v4.app.FragmentActivity;
+import android.support.v4.app.FragmentManager;
+import android.support.v4.app.FragmentPagerAdapter;
+import android.support.v4.app.NotificationCompat;
+import android.support.v4.view.MenuItemCompat;
+import android.support.v4.view.ViewPager;
+import android.view.Menu;
+import android.view.MenuInflater;
+import android.view.MenuItem;
+import android.widget.Toast;
+
+/** 
+ * Spydroid basically launches an RTSP server and an HTTP server, 
+ * clients can then connect to them and start/stop audio/video streams on the phone.
+ */
+public class SpydroidActivity extends FragmentActivity {
+
+	static final public String TAG = "SpydroidActivity";
+	
+	public final int HANDSET = 0x01;
+	public final int TABLET = 0x02;
+
+	// We assume that the device is a phone
+	public int device = HANDSET;
+
+	private ViewPager mViewPager;
+	private PowerManager.WakeLock mWakeLock;
+	private SectionsPagerAdapter mAdapter;
+	private SurfaceView mSurfaceView;
+	private SpydroidApplication mApplication;
+	//private CustomHttpServer mHttpServer;
+	//private RtspServer mRtspServer;
+
+	public void onCreate(Bundle savedInstanceState) {
+		super.onCreate(savedInstanceState);
+
+		mApplication = (SpydroidApplication) getApplication();
+
+		setContentView(R.layout.spydroid);
+
+		if (findViewById(R.id.handset_pager) != null) {
+
+			// Handset detected !
+			mAdapter = new SectionsPagerAdapter(getSupportFragmentManager());
+			mViewPager = (ViewPager) findViewById(R.id.handset_pager);
+			setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+			mSurfaceView = (SurfaceView)findViewById(R.id.handset_camera_view);
+			SessionBuilder.getInstance().setSurfaceView(mSurfaceView);
+			SessionBuilder.getInstance().setPreviewOrientation(90);
+			
+		} else {
+
+			// Tablet detected !
+			device = TABLET;
+			mAdapter = new SectionsPagerAdapter(getSupportFragmentManager());
+			mViewPager = (ViewPager) findViewById(R.id.tablet_pager);
+			setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+			SessionBuilder.getInstance().setPreviewOrientation(0);
+			
+		}
+
+		mViewPager.setAdapter(mAdapter);
+
+		// Prevents the phone from going to sleep mode
+		PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+		mWakeLock = pm.newWakeLock(PowerManager.FULL_WAKE_LOCK, "com.raygo.spydroid.wakelock");
+
+		// Starts the service of the RTSP server
+		//this.startService(new Intent(this,CustomRtspServer.class));
+		//Toast.makeText(getApplicationContext(), "Start service", Toast.LENGTH_SHORT).show();
+	}
+
+	public void onStart() {
+		super.onStart();
+
+		// Lock screen
+		mWakeLock.acquire();
+
+		// Did the user disabled the notification ?
+		if (mApplication.notificationEnabled) {
+			Intent notificationIntent = new Intent(this, SpydroidActivity.class);
+			PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, PendingIntent.FLAG_CANCEL_CURRENT);
+
+			NotificationCompat.Builder builder = new NotificationCompat.Builder(this);
+			Notification notification = builder.setContentIntent(pendingIntent)
+					.setWhen(System.currentTimeMillis())
+					.setTicker(getText(R.string.notification_title))
+					.setSmallIcon(R.drawable.icon)
+					.setContentTitle(getText(R.string.notification_title))
+					.setContentText(getText(R.string.notification_content)).build();
+			notification.flags |= Notification.FLAG_ONGOING_EVENT;
+			((NotificationManager)getSystemService(Context.NOTIFICATION_SERVICE)).notify(0,notification);
+		} else {
+			removeNotification();
+		}		
+	}
+
+	@Override
+	public void onStop() {
+		super.onStop();
+		// A WakeLock should only be released when isHeld() is true !
+		if (mWakeLock.isHeld()) mWakeLock.release();
+	}
+
+	@Override
+	public void onResume() {
+		super.onResume();
+		mApplication.applicationForeground = true;
+	}
+
+	@Override
+	public void onPause() {
+		super.onPause();
+		mApplication.applicationForeground = false;
+	}
+
+	@Override
+	public void onDestroy() {
+		//Log.d(TAG,"SpydroidActivity destroyed");
+		super.onDestroy();
+	}
+
+	@Override    
+	public void onBackPressed() {
+		Intent setIntent = new Intent(Intent.ACTION_MAIN);
+		setIntent.addCategory(Intent.CATEGORY_HOME);
+		setIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+		startActivity(setIntent);
+	}
+
+	@Override    
+	public boolean onCreateOptionsMenu(Menu menu) {
+		MenuInflater inflater = getMenuInflater();
+		inflater.inflate(R.menu.menu, menu);
+		MenuItemCompat.setShowAsAction(menu.findItem(R.id.quit), 1);
+		MenuItemCompat.setShowAsAction(menu.findItem(R.id.options), 1);
+		return true;
+	}
+
+	@Override    
+	public boolean onOptionsItemSelected(MenuItem item) {
+		Intent intent;
+
+		switch (item.getItemId()) {
+		case R.id.options:
+			// Starts QualityListActivity where user can change the streaming quality
+			intent = new Intent(this.getBaseContext(),OptionsActivity.class);
+			startActivityForResult(intent, 0);
+			return true;
+		case R.id.quit:
+			quitSpydroid();
+			return true;
+		default:
+			return super.onOptionsItemSelected(item);
+		}
+	}
+
+	private void quitSpydroid() {
+		// Removes notification
+		if (mApplication.notificationEnabled) removeNotification();
+		// Kills RTSP server
+		this.stopService(new Intent(this,RtspServer.class));
+		// Returns to home menu
+		finish();
+	}
+	
+	
+	private void removeNotification() {
+		((NotificationManager)getSystemService(Context.NOTIFICATION_SERVICE)).cancel(0);
+	}
+
+	public void log(String s) {
+		Toast.makeText(getApplicationContext(), s, Toast.LENGTH_SHORT).show();
+	}
+
+	class SectionsPagerAdapter extends FragmentPagerAdapter {
+
+		public SectionsPagerAdapter(FragmentManager fm) {
+			super(fm);
+		}
+
+		@Override
+		public Fragment getItem(int i) {
+			if (device == HANDSET) {
+				switch (i) {
+				case 0: return new HandsetFragment();
+				case 1: return new PreviewFragment();
+				case 2: return new AboutFragment();
+				}
+			} else {
+				switch (i) {
+				case 0: return new TabletFragment();
+				case 1: return new AboutFragment();
+				}        		
+			}
+			return null;
+		}
+
+		@Override
+		public int getCount() {
+			return device==HANDSET ? 3 : 2;
+		}
+
+		public HandsetFragment getHandsetFragment() {
+			if (device == HANDSET) {
+				return (HandsetFragment) getSupportFragmentManager().findFragmentByTag("android:switcher:"+R.id.handset_pager+":0");
+			} else {
+				return (HandsetFragment) getSupportFragmentManager().findFragmentById(R.id.handset);
+			}
+		}
+
+		public PreviewFragment getPreviewFragment() {
+			if (device == HANDSET) {
+				return (PreviewFragment) getSupportFragmentManager().findFragmentByTag("android:switcher:"+R.id.handset_pager+":1");
+			} else {
+				return (PreviewFragment) getSupportFragmentManager().findFragmentById(R.id.preview);
+			}
+		}
+
+		@Override
+		public CharSequence getPageTitle(int position) {
+			if (device == HANDSET) {
+				switch (position) {
+				case 0: return getString(R.string.page0);
+				case 1: return getString(R.string.page1);
+				case 2: return getString(R.string.page2);
+				}        		
+			} else {
+				switch (position) {
+				case 0: return getString(R.string.page0);
+				case 1: return getString(R.string.page2);
+				}
+			}
+			return null;
+		}
+
+	}
+
+}
